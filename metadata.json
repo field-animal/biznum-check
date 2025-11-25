@@ -1,0 +1,5 @@
+{
+  "name": "BizCheck - Business Status lookup",
+  "description": "A tool to check Korean business registration status in bulk using the NTS public API.",
+  "requestFramePermissions": []
+}
