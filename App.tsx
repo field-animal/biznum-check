@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { InputForm } from './components/InputForm';
 import { ResultTable } from './components/ResultTable';
 import { DashboardStats } from './components/DashboardStats';
@@ -12,10 +12,16 @@ const App: React.FC = () => {
   const [results, setResults] = useState<LogItem[]>([]);
   const [status, setStatus] = useState<ProcessStatus>(ProcessStatus.IDLE);
   const [progress, setProgress] = useState<number>(0);
+  
+  // Ref to signal cancellation
+  const stopSignalRef = useRef(false);
 
   const handleStart = useCallback(async () => {
     if (!serviceKey || !businessNumbers) return;
 
+    // Reset stop signal
+    stopSignalRef.current = false;
+    
     setStatus(ProcessStatus.PROCESSING);
     setResults([]); // Clear previous results
     setProgress(0);
@@ -37,6 +43,11 @@ const App: React.FC = () => {
 
     // 2. Process each item individually as requested
     for (const b_no of list) {
+      // Check for cancellation before starting the request
+      if (stopSignalRef.current) {
+        break;
+      }
+
       try {
         const data = await fetchBusinessStatus(serviceKey, b_no);
         
@@ -93,12 +104,28 @@ const App: React.FC = () => {
       // Update state incrementally to show progress in table
       setResults([...newResults]);
       
+      // Check for cancellation after request
+      if (stopSignalRef.current) {
+        break;
+      }
+
       // Small delay to be nice to the API and allow UI to render
       await new Promise(resolve => setTimeout(resolve, 50)); 
     }
 
-    setStatus(ProcessStatus.COMPLETED);
+    // Set status based on whether it was cancelled or completed naturally
+    if (stopSignalRef.current) {
+      setStatus(ProcessStatus.IDLE); // Allow user to restart immediately
+    } else {
+      setStatus(ProcessStatus.COMPLETED);
+    }
   }, [serviceKey, businessNumbers]);
+
+  const handleCancel = useCallback(() => {
+    stopSignalRef.current = true;
+    // We don't set status to IDLE here immediately to allow the loop to exit gracefully 
+    // and handle the final state update in handleStart
+  }, []);
 
   const handleReset = useCallback(() => {
     setBusinessNumbers('');
@@ -134,6 +161,7 @@ const App: React.FC = () => {
                 businessNumbers={businessNumbers}
                 setBusinessNumbers={setBusinessNumbers}
                 onStart={handleStart}
+                onCancel={handleCancel}
                 onReset={handleReset}
                 status={status}
                 progress={progress}

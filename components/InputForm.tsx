@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Key, FileText, Play, RotateCcw, Loader2 } from 'lucide-react';
+import { Key, FileText, Play, RotateCcw, Loader2, Square } from 'lucide-react';
 import { ProcessStatus } from '../types';
 
 interface InputFormProps {
@@ -8,6 +8,7 @@ interface InputFormProps {
   businessNumbers: string;
   setBusinessNumbers: (nums: string) => void;
   onStart: () => void;
+  onCancel: () => void;
   onReset: () => void;
   status: ProcessStatus;
   progress: number;
@@ -19,6 +20,7 @@ export const InputForm: React.FC<InputFormProps> = ({
   businessNumbers,
   setBusinessNumbers,
   onStart,
+  onCancel,
   onReset,
   status,
   progress
@@ -88,27 +90,28 @@ export const InputForm: React.FC<InputFormProps> = ({
         )}
 
         <div className="flex gap-3">
-          <button
-            onClick={onStart}
-            disabled={isProcessing || !serviceKey || !businessNumbers.trim()}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-medium text-white shadow-sm transition-all
-              ${isProcessing || !serviceKey || !businessNumbers.trim()
-                ? 'bg-slate-300 cursor-not-allowed'
-                : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-md active:transform active:scale-95'
-              }`}
-          >
-            {isProcessing ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                조회 중... {Math.round(progress)}%
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4" />
-                상태 조회 (Run)
-              </>
-            )}
-          </button>
+          {isProcessing ? (
+            <button
+              onClick={onCancel}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-medium text-white shadow-sm transition-all bg-red-500 hover:bg-red-600 active:transform active:scale-95"
+            >
+              <Square className="w-4 h-4 fill-current" />
+              중단 (Stop)
+            </button>
+          ) : (
+            <button
+              onClick={onStart}
+              disabled={!serviceKey || !businessNumbers.trim()}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-medium text-white shadow-sm transition-all
+                ${!serviceKey || !businessNumbers.trim()
+                  ? 'bg-slate-300 cursor-not-allowed'
+                  : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-md active:transform active:scale-95'
+                }`}
+            >
+              <Play className="w-4 h-4" />
+              상태 조회 (Run)
+            </button>
+          )}
           
           <button
             onClick={onReset}
