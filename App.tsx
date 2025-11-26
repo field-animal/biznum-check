@@ -2,20 +2,12 @@ import React, { useState, useCallback, useRef } from 'react';
 import { InputForm } from './components/InputForm';
 import { ResultTable } from './components/ResultTable';
 import { DashboardStats } from './components/DashboardStats';
-import { fetchBusinessStatus } from './services/ntsService';
+import { fetchBusinessStatus, fetchBusinessStatusBatch } from './services/ntsService';
 import { LogItem, ProcessStatus } from './types';
 import { LayoutGrid } from 'lucide-react';
 
 // Helper to generate unique ID safe for insecure contexts (HTTP)
-// crypto.randomUUID() throws errors in non-HTTPS environments (e.g., Docker via IP)
 const generateId = () => {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    try {
-      return crypto.randomUUID();
-    } catch (e) {
-      // Fallback if crypto exists but randomUUID fails
-    }
-  }
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 };
 
@@ -27,13 +19,14 @@ const App: React.FC = () => {
   const [progress, setProgress] = useState<number>(0);
   
   // Ref to signal cancellation
-  const stopSignalRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const handleStart = useCallback(async () => {
     if (!serviceKey || !businessNumbers) return;
 
-    // Reset stop signal
-    stopSignalRef.current = false;
+    // Initialize AbortController
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
     
     setStatus(ProcessStatus.PROCESSING);
     setResults([]); // Clear previous results
@@ -51,18 +44,24 @@ const App: React.FC = () => {
     }
 
     const total = list.length;
+
+    // =================================================================================
+    // [Legacy Code Preserved]
+    // Previous implementation: Processing item by item
+    // =================================================================================
+    /*
     let completed = 0;
     const newResults: LogItem[] = [];
-
+    
     // 2. Process each item individually as requested
     for (const b_no of list) {
       // Check for cancellation before starting the request
-      if (stopSignalRef.current) {
+      if (signal.aborted) {
         break;
       }
 
       try {
-        const data = await fetchBusinessStatus(serviceKey, b_no);
+        const data = await fetchBusinessStatus(serviceKey, b_no, signal);
         
         if (data) {
           newResults.unshift({
@@ -92,6 +91,8 @@ const App: React.FC = () => {
           });
         }
       } catch (e: any) {
+        if (e.name === 'AbortError') break;
+
         newResults.unshift({
           b_no: b_no,
           b_stt: '',
@@ -117,27 +118,103 @@ const App: React.FC = () => {
       // Update state incrementally to show progress in table
       setResults([...newResults]);
       
-      // Check for cancellation after request
-      if (stopSignalRef.current) {
-        break;
-      }
-
       // Small delay to be nice to the API and allow UI to render
       await new Promise(resolve => setTimeout(resolve, 50)); 
     }
+    */
+    // =================================================================================
 
-    // Set status based on whether it was cancelled or completed naturally
-    if (stopSignalRef.current) {
-      setStatus(ProcessStatus.IDLE); // Allow user to restart immediately
+    // =================================================================================
+    // [New Implementation]
+    // Batch processing
+    // =================================================================================
+    
+    // Split into chunks of 100 (Common API limit for NTS is 100)
+    const BATCH_SIZE = 100;
+    const chunks = [];
+    for (let i = 0; i < total; i += BATCH_SIZE) {
+      chunks.push(list.slice(i, i + BATCH_SIZE));
+    }
+
+    let processedCount = 0;
+
+    for (const chunk of chunks) {
+      if (signal.aborted) break;
+
+      try {
+        const batchData = await fetchBusinessStatusBatch(serviceKey, chunk, signal);
+        
+        // Prepare map for quick lookup
+        const resultCount = batchData.length;
+        const resultMap = new Map(batchData.map(item => [item.b_no, item]));
+        
+        // Construct results preserving the order of the chunk (or reversed if we want LIFO in table)
+        // Here we map the requested numbers to results
+        const chunkResults: LogItem[] = chunk.map(requestedBNo => {
+          const cleanBNo = requestedBNo.replace(/[^0-9]/g, '');
+          const data = resultMap.get(cleanBNo);
+
+          if (data) {
+            return {
+              ...data,
+              id: generateId(),
+              timestamp: Date.now(),
+              isSuccess: true
+            };
+          } else {
+            // Requested but not returned by API
+            return {
+              b_no: requestedBNo,
+              b_stt: '', b_stt_cd: '', tax_type: '데이터 없음', tax_type_cd: '',
+              end_dt: '', utcc_yn: '', tax_type_change_dt: '', invoice_apply_dt: '',
+              rbf_tax_type: '', rbf_tax_type_cd: '',
+              id: generateId(),
+              timestamp: Date.now(),
+              isSuccess: false,
+              errorMessage: '결과 없음'
+            };
+          }
+        });
+
+        // Add new results to the top of the list
+        setResults(prev => [...chunkResults, ...prev]);
+
+      } catch (e: any) {
+        if (e.name === 'AbortError') break;
+
+        // Mark all items in this chunk as failed
+        const errorResults: LogItem[] = chunk.map(b_no => ({
+          b_no,
+          b_stt: '', b_stt_cd: '', tax_type: '에러 발생', tax_type_cd: '',
+          end_dt: '', utcc_yn: '', tax_type_change_dt: '', invoice_apply_dt: '',
+          rbf_tax_type: '', rbf_tax_type_cd: '',
+          id: generateId(),
+          timestamp: Date.now(),
+          isSuccess: false,
+          errorMessage: e.message || 'Batch request failed'
+        }));
+        
+        setResults(prev => [...errorResults, ...prev]);
+      }
+
+      processedCount += chunk.length;
+      setProgress(Math.min((processedCount / total) * 100, 100));
+      
+      // Small delay for UI updates
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    if (signal.aborted) {
+      setStatus(ProcessStatus.IDLE);
     } else {
       setStatus(ProcessStatus.COMPLETED);
     }
   }, [serviceKey, businessNumbers]);
 
   const handleCancel = useCallback(() => {
-    stopSignalRef.current = true;
-    // We don't set status to IDLE here immediately to allow the loop to exit gracefully 
-    // and handle the final state update in handleStart
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
   }, []);
 
   const handleReset = useCallback(() => {

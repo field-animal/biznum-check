@@ -8,7 +8,8 @@ const API_BASE_URL = "https://api.odcloud.kr/api/nts-businessman/v1/status";
  */
 export const fetchBusinessStatus = async (
   serviceKey: string,
-  businessNumber: string
+  businessNumber: string,
+  signal?: AbortSignal
 ): Promise<BusinessStatusItem | null> => {
   // Clean the business number (remove dashes, spaces)
   const cleanBNo = businessNumber.replace(/[^0-9]/g, '');
@@ -17,12 +18,7 @@ export const fetchBusinessStatus = async (
   if (!cleanBNo) return null;
 
   // Handle Service Key Encoding logic
-  // The API requires the service key in the query string.
-  // Users may provide the "Decoding" key (standard Base64-like string) or "Encoding" key (URL-encoded).
-  // Check if the key matches a URL-encoded pattern (contains % followed by hex).
   const isEncoded = /%[0-9A-Fa-f]{2}/.test(cleanKey);
-  
-  // If it looks encoded, use as is. Otherwise, encode it.
   const finalKey = isEncoded ? cleanKey : encodeURIComponent(cleanKey);
 
   try {
@@ -33,14 +29,14 @@ export const fetchBusinessStatus = async (
         'Accept': 'application/json',
       },
       body: JSON.stringify({
-        b_no: [cleanBNo], // Sending as a single-item array per requirement
+        b_no: [cleanBNo],
       }),
+      signal
     });
 
     if (!response.ok) {
       let errorDetail = '';
       try {
-        // Try to extract detailed error message from API response if available
         const errorBody = await response.json();
         if (errorBody.msg) {
           errorDetail = ` (${errorBody.msg})`;
@@ -59,7 +55,68 @@ export const fetchBusinessStatus = async (
     
     return null;
   } catch (error) {
+    // Don't log abort errors as failures
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error;
+    }
     console.error(`Failed to fetch status for ${cleanBNo}`, error);
+    throw error;
+  }
+};
+
+/**
+ * Fetches status for multiple business numbers in a single batch request.
+ */
+export const fetchBusinessStatusBatch = async (
+  serviceKey: string,
+  businessNumbers: string[],
+  signal?: AbortSignal
+): Promise<BusinessStatusItem[]> => {
+  const cleanKey = serviceKey.trim();
+  // Clean numbers and remove empty ones
+  const cleanBNos = businessNumbers
+    .map(b => b.replace(/[^0-9]/g, ''))
+    .filter(b => b.length > 0);
+
+  if (cleanBNos.length === 0) return [];
+
+  // Handle Service Key Encoding logic
+  const isEncoded = /%[0-9A-Fa-f]{2}/.test(cleanKey);
+  const finalKey = isEncoded ? cleanKey : encodeURIComponent(cleanKey);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}?serviceKey=${finalKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({
+        b_no: cleanBNos,
+      }),
+      signal
+    });
+
+    if (!response.ok) {
+      let errorDetail = '';
+      try {
+        const errorBody = await response.json();
+        if (errorBody.msg) {
+          errorDetail = ` (${errorBody.msg})`;
+        }
+      } catch (e) {
+        // Ignore JSON parse errors on error responses
+      }
+      throw new Error(`API Error: ${response.status} ${response.statusText}${errorDetail}`);
+    }
+
+    const data: ApiResponse = await response.json();
+    return data.data || [];
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error;
+    }
+    console.error(`Failed to fetch batch status`, error);
     throw error;
   }
 };
