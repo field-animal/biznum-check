@@ -6,6 +6,19 @@ import { fetchBusinessStatus } from './services/ntsService';
 import { LogItem, ProcessStatus } from './types';
 import { LayoutGrid } from 'lucide-react';
 
+// Helper to generate unique ID safe for insecure contexts (HTTP)
+// crypto.randomUUID() throws errors in non-HTTPS environments (e.g., Docker via IP)
+const generateId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    try {
+      return crypto.randomUUID();
+    } catch (e) {
+      // Fallback if crypto exists but randomUUID fails
+    }
+  }
+  return Date.now().toString(36) + Math.random().toString(36).substring(2);
+};
+
 const App: React.FC = () => {
   const [serviceKey, setServiceKey] = useState<string>('');
   const [businessNumbers, setBusinessNumbers] = useState<string>('');
@@ -54,7 +67,7 @@ const App: React.FC = () => {
         if (data) {
           newResults.unshift({
             ...data,
-            id: crypto.randomUUID(),
+            id: generateId(),
             timestamp: Date.now(),
             isSuccess: true
           });
@@ -72,7 +85,7 @@ const App: React.FC = () => {
             invoice_apply_dt: '',
             rbf_tax_type: '',
             rbf_tax_type_cd: '',
-            id: crypto.randomUUID(),
+            id: generateId(),
             timestamp: Date.now(),
             isSuccess: false,
             errorMessage: 'No data returned'
@@ -91,7 +104,7 @@ const App: React.FC = () => {
           invoice_apply_dt: '',
           rbf_tax_type: '',
           rbf_tax_type_cd: '',
-          id: crypto.randomUUID(),
+          id: generateId(),
           timestamp: Date.now(),
           isSuccess: false,
           errorMessage: e.message || 'Unknown error'
@@ -143,7 +156,7 @@ const App: React.FC = () => {
             <div className="bg-indigo-600 p-1.5 rounded-lg">
               <LayoutGrid className="w-6 h-6 text-white" />
             </div>
-            <h1 className="text-xl font-bold text-slate-800 tracking-tight">BizCheck</h1>
+            <h1 className="text-xl font-bold text-slate-800 tracking-tight">사업자 번호 상태 조회</h1>
           </div>
         </div>
       </header>
